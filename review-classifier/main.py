@@ -1,5 +1,6 @@
 # -*- coding: UTF-8 -*-
 import argparse
+import six
 import random
 import time
 import math
@@ -11,7 +12,7 @@ import torch.optim as optim
 from torch.autograd import Variable
 from collections import Counter
 
-""" XOR演算子の学習
+""" レビュー分類
 """
 data_list = [[0, 0],
              [0, 1],
@@ -19,7 +20,7 @@ data_list = [[0, 0],
              [1, 1]]
 label_list = [[0], [1], [1], [0]]
 
-NEPOCH = 100000000
+NEPOCH = 10
 
 parser = argparse.ArgumentParser()
 parser.add_argument("fname", type=str, help="Filename of dataset")
@@ -126,37 +127,52 @@ class Dict:
         return self.dic_id2word.get(id, "<unk>")
 
 
+def sentence2id(sentence, dic):
+    """ convert a sentence into id list using word dictionary
+    """
+    return [dic.word2id("<s>")] + [dic.word2id(word) for word in sentence.split()] + [dic.word2id("</s>")]
+
+def fill_batch(sen_list):
+    max_len = max([len(sen) for sen in sen_list])
+
+    filled_sen_list = []
+    for sen in sen_list:
+        filled_sen_list.append(sen + [0 for _ in range(max_len-len(sen))])
+
+    return filled_sen_list
+
 def train():
 
     # 辞書作成
     dic = Dict(train_sens, 5000)
 
-    exit()
+    # 言語データをWordID化
+    train_sens_id = np.array([sentence2id(sentence[0], dic) for sentence in train_sens])
+
+    N = len(train_sens_id) # 事例数
+    batchsize = 50
+
     model = Model()
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters())
     for epoch in range(NEPOCH):
 
-        data = Variable(torch.FloatTensor(data_list))
-        target = Variable(torch.FloatTensor(label_list))
+        # training
+        perm = np.random.permutation(N) #ランダムな整数列リストを取得
+        sum_loss     = 0.0
+        sum_accuracy = 0.0
 
-        optimizer.zero_grad()
-        output = model(data)
-        loss = criterion(output, target)
-        loss.backward()
-        optimizer.step()
+        for i in six.moves.range(0, N, batchsize):
 
-        if epoch % 500 == 0:
+            x = Variable(torch.FloatTensor(fill_batch(train_sens_id[perm[i:i + batchsize]]))) # source
+            t = Variable(torch.FloatTensor(np.array(train_labels[perm[i:i + batchsize]], dtype=np.float16).tolist()))  # target
+
+            optimizer.zero_grad()
+            y = model(x)
+            loss = criterion(y, t)
+            loss.backward()
+            optimizer.step()
             print "epoch:%d" % epoch, "loss:%5f" % loss.data[0]
-            # TEST
-            test_data = [[0, 0], [0, 1], [1, 0], [1, 1]]
-            random.shuffle(test_data)
-            tdata = Variable(torch.FloatTensor(test_data))
-            pred = model(tdata)
-            print "input: ", test_data
-            print "predi: ", pred.data
-            print " - - - - - - -"
-
 
 def main():
     train()
