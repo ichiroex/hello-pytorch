@@ -3,11 +3,13 @@ import argparse
 import random
 import time
 import math
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
+from collections import Counter
 
 """ XOR演算子の学習
 """
@@ -34,9 +36,14 @@ VALID_DATA_RATE = 0.1
 TEST_DATA_RATE  = 0.1
 
 # データ分割
-train_dataset = dataset[:int(N * TRAIN_DATA_RATE)]
-valid_dataset = dataset[len(train_dataset):(len(train_dataset)+int(N * VALID_DATA_RATE))]
-test_dataset  = dataset[(len(train_dataset)+len(valid_dataset)):]
+train_dataset = np.array(dataset[:int(N * TRAIN_DATA_RATE)])
+valid_dataset = np.array(dataset[len(train_dataset):(len(train_dataset)+int(N * VALID_DATA_RATE))])
+test_dataset  = np.array(dataset[(len(train_dataset)+len(valid_dataset)):])
+
+# ラベルと文に分割
+train_labels, train_sens = np.hsplit(train_dataset, [1])
+valid_labels, valid_sens = np.hsplit(valid_dataset, [1])
+test_labels, test_sens = np.hsplit(test_dataset, [1])
 
 print "DATASET SIZE:", N
 print "TRAIN DATA SIZE:", len(train_dataset)
@@ -58,8 +65,73 @@ class Model(nn.Module):
         return y
 
 
+class Dict:
+    def __init__(self, dataset, vocab):
+        """ 辞書管理クラス
+        Args:
+            dataset: 文リスト
+            vocab: 語彙数
+        Return:
+        """
+
+        self.dataset = dataset
+
+        counter = Counter()
+        # WORD COUNT via Counter
+        all_words = []
+        for sen in self.dataset:
+            all_words += sen[0].split()
+        counter = Counter(all_words)
+
+        print "Original vocab:", counter.__len__()
+        print "Number of vocab:", vocab
+
+        self.dic_word2id = {}
+        self.dic_word2id["<pad>"] = 0
+        self.dic_word2id["<s>"] = 1
+        self.dic_word2id["</s>"] = 2
+        self.dic_word2id["<unk>"] = 3
+
+        self.dic_id2word = {}
+        self.dic_id2word[0] = "<pad>"
+        self.dic_id2word[1] = "<s>"
+        self.dic_id2word[2] = "</s>"
+        self.dic_id2word[3] = "<unk>"
+
+        N_DUMMY = 4
+
+        for idx, (word, num) in enumerate(counter.most_common()):
+            # 語彙数制限
+            if idx > vocab:
+                break
+            self.dic_word2id[word] = idx + N_DUMMY
+            self.dic_id2word[idx + N_DUMMY] = word
+
+    def word2id(self, word):
+        """
+        Args:
+            word: word
+        Return:
+            id: id correspoding to input word
+        """
+        return self.dic_word2id.get(word, 3)
+
+    def id2word(self, id):
+        """
+        Args:
+            id: word id
+        Return:
+            word: a word correspoding to input id
+        """
+        return self.dic_id2word.get(id, "<unk>")
+
+
 def train():
 
+    # 辞書作成
+    dic = Dict(train_sens, 5000)
+
+    exit()
     model = Model()
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters())
