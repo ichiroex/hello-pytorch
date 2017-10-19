@@ -80,14 +80,14 @@ class Dict:
 
         self.dataset = dataset
 
-        self.counter = Counter()
+        counter = Counter()
         # WORD COUNT via Counter
         all_words = []
         for sen in self.dataset:
             all_words += sen[0].split()
-        self.counter = Counter(all_words)
+        counter = Counter(all_words)
 
-        print "Original vocab:", self.counter.__len__()
+        print "Original vocab:", counter.__len__()
         print "Number of vocab:", vocab
 
         self.dic_word2id = {}
@@ -104,7 +104,7 @@ class Dict:
 
         N_DUMMY = 4
 
-        for idx, (word, num) in enumerate(self.counter.most_common()):
+        for idx, (word, num) in enumerate(counter.most_common()):
             # 語彙数制限
             if idx > vocab:
                 break
