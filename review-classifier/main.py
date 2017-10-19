@@ -53,14 +53,17 @@ print "TEST DATA SIZE:", len(test_dataset)
 
 class Model(nn.Module):
 
-    def __init__(self, hidden=10):
+    def __init__(self, vocab):
         super(Model, self).__init__()
-        self.l1 = nn.Linear(2, hidden)
-        self.l2 = nn.Linear(hidden, hidden)
-        self.l3 = nn.Linear(hidden, 1)
+        self.emb = nn.Embedding(vocab, 300, padding_idx=0)
+        self.rnn = nn.LSTM(300, 500)
+        self.l1 = nn.Linear(500, 100)
+        self.l2 = nn.Linear(100, 1)
 
     def forward(self, input):
-        h = F.relu(self.l1(input))
+        h = self.emb(input)
+        h = F.relu(self.rnn(h))
+        h = F.relu(self.l1(h))
         h = F.relu(self.l2(h))
         y = self.l3(h)
         return y
@@ -77,14 +80,14 @@ class Dict:
 
         self.dataset = dataset
 
-        counter = Counter()
+        self.counter = Counter()
         # WORD COUNT via Counter
         all_words = []
         for sen in self.dataset:
             all_words += sen[0].split()
-        counter = Counter(all_words)
+        self.counter = Counter(all_words)
 
-        print "Original vocab:", counter.__len__()
+        print "Original vocab:", self.counter.__len__()
         print "Number of vocab:", vocab
 
         self.dic_word2id = {}
@@ -101,7 +104,7 @@ class Dict:
 
         N_DUMMY = 4
 
-        for idx, (word, num) in enumerate(counter.most_common()):
+        for idx, (word, num) in enumerate(self.counter.most_common()):
             # 語彙数制限
             if idx > vocab:
                 break
@@ -152,7 +155,7 @@ def train():
     N = len(train_sens_id) # 事例数
     batchsize = 50
 
-    model = Model()
+    model = Model(5000 + 4)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters())
     for epoch in range(NEPOCH):
