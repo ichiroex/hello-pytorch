@@ -11,63 +11,27 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
 from collections import Counter
-
+from itertools import chain
 """ レビュー分類
 """
-data_list = [[0, 0],
-             [0, 1],
-             [1, 0],
-             [1, 1]]
-label_list = [[0], [1], [1], [0]]
-
-NEPOCH = 10
-
-parser = argparse.ArgumentParser()
-parser.add_argument("fname", type=str, help="Filename of dataset")
-args = parser.parse_args()
-
-dataset = []
-with open(args.fname, "r") as f:
-    for line in f:
-        dataset.append(line.strip().split(" ", 1))
-
-N = len(dataset)
-TRAIN_DATA_RATE = 0.8
-VALID_DATA_RATE = 0.1
-TEST_DATA_RATE  = 0.1
-
-# データ分割
-train_dataset = np.array(dataset[:int(N * TRAIN_DATA_RATE)])
-valid_dataset = np.array(dataset[len(train_dataset):(len(train_dataset)+int(N * VALID_DATA_RATE))])
-test_dataset  = np.array(dataset[(len(train_dataset)+len(valid_dataset)):])
-
-# ラベルと文に分割
-train_labels, train_sens = np.hsplit(train_dataset, [1])
-valid_labels, valid_sens = np.hsplit(valid_dataset, [1])
-test_labels, test_sens = np.hsplit(test_dataset, [1])
-
-print "DATASET SIZE:", N
-print "TRAIN DATA SIZE:", len(train_dataset)
-print "VALID DATA SIZE:", len(valid_dataset)
-print "TEST DATA SIZE:", len(test_dataset)
+EMBEDSIZE = 300
+HIDDENSIZE = 300
 
 class Model(nn.Module):
 
     def __init__(self, vocab):
         super(Model, self).__init__()
-        self.emb = nn.Embedding(vocab, 300, padding_idx=0)
-        self.rnn = nn.LSTM(300, 500)
-        self.l1 = nn.Linear(500, 100)
-        self.l2 = nn.Linear(100, 1)
+        self.emb = nn.Embedding(vocab, EMBEDSIZE, padding_idx=0)
+        self.lstm = nn.LSTMCell(HIDDENSIZE, HIDDENSIZE)
+        self.linear = nn.Linear(HIDDENSIZE, 2)
+        self.softmax = nn.Softmax()
 
-    def forward(self, input):
-        h = self.emb(input)
-        h = F.relu(self.rnn(h))
-        h = F.relu(self.l1(h))
-        h = F.relu(self.l2(h))
-        y = self.l3(h)
-        return y
-
+    def forward(self, x, h, c):
+        e = self.emb(x)
+        hx, cx = self.lstm(e, (h, c))
+        h = F.relu(self.linear(hx))
+        y = self.softmax(h)
+        return y, hx, cx
 
 class Dict:
     def __init__(self, dataset, vocab):
@@ -129,6 +93,9 @@ class Dict:
         """
         return self.dic_id2word.get(id, "<unk>")
 
+    def get_vocabnum(self):
+        return len(self.dic_id2word)
+
 
 def sentence2id(sentence, dic):
     """ convert a sentence into id list using word dictionary
@@ -144,38 +111,113 @@ def fill_batch(sen_list):
 
     return filled_sen_list
 
+
 def train():
+
+    NEPOCH = 10
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("fname", type=str, help="Filename of dataset")
+    args = parser.parse_args()
+
+    dataset = []
+    with open(args.fname, "r") as f:
+        for line in f:
+            label, sentence = line.strip().split(" ", 1)
+            label = np.eye(2)[int(label)]
+            dataset.append([label, sentence])
+
+    N = len(dataset)
+    TRAIN_DATA_RATE = 0.8
+    VALID_DATA_RATE = 0.1
+    TEST_DATA_RATE  = 0.1
+
+    # データ分割
+    train_dataset = np.array(dataset[:int(N * TRAIN_DATA_RATE)])
+    valid_dataset = np.array(dataset[len(train_dataset):(len(train_dataset)+int(N * VALID_DATA_RATE))])
+    test_dataset  = np.array(dataset[(len(train_dataset)+len(valid_dataset)):])
+
+    # ラベルと文に分割
+    train_labels, train_sens = np.hsplit(train_dataset, [1])
+    valid_labels, valid_sens = np.hsplit(valid_dataset, [1])
+    test_labels, test_sens = np.hsplit(test_dataset, [1])
+
+    print "DATASET SIZE:", N
+    print "TRAIN DATA SIZE:", len(train_dataset)
+    print "VALID DATA SIZE:", len(valid_dataset)
+    print "TEST DATA SIZE:", len(test_dataset)
+
+    train_labels = np.array(list(chain.from_iterable(train_labels)))
+    valid_labels = np.array(list(chain.from_iterable(valid_labels)))
+    test_labels = np.array(list(chain.from_iterable(test_labels)))
 
     # 辞書作成
     dic = Dict(train_sens, 5000)
 
     # 言語データをWordID化
     train_sens_id = np.array([sentence2id(sentence[0], dic) for sentence in train_sens])
+    valid_sens_id = np.array([sentence2id(sentence[0], dic) for sentence in valid_sens])
 
-    N = len(train_sens_id) # 事例数
+    TRAIN_N = len(train_sens_id) # 事例数
+    VALID_N = len(valid_sens_id)
     batchsize = 50
 
-    model = Model(5000 + 4)
+    model = Model(dic.get_vocabnum())
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters())
+
     for epoch in range(NEPOCH):
 
-        # training
-        perm = np.random.permutation(N) #ランダムな整数列リストを取得
+        ### TRAINING ###
+        perm = np.random.permutation(TRAIN_N) #ランダムな整数列リストを取得
         sum_loss     = 0.0
         sum_accuracy = 0.0
+        for i in six.moves.range(0, TRAIN_N, batchsize):
 
-        for i in six.moves.range(0, N, batchsize):
-
-            x = Variable(torch.FloatTensor(fill_batch(train_sens_id[perm[i:i + batchsize]]))) # source
+            x = Variable(torch.LongTensor(fill_batch(train_sens_id[perm[i:i + batchsize]]))) # source
             t = Variable(torch.FloatTensor(np.array(train_labels[perm[i:i + batchsize]], dtype=np.float16).tolist()))  # target
 
             optimizer.zero_grad()
-            y = model(x)
+
+            x = torch.transpose(x, 0, 1) # 転置
+
+            h = Variable(torch.randn(batchsize, HIDDENSIZE))
+            c = Variable(torch.randn(batchsize, HIDDENSIZE))
+
+            for j in range(len(x)):
+                y, h, c = model(x[j], h, c)
+
             loss = criterion(y, t)
+            sum_loss += loss.data[0] * len(t)
+
             loss.backward()
             optimizer.step()
-            print "epoch:%d" % epoch, "loss:%5f" % loss.data[0]
+
+        print "epoch:%d" % epoch, "loss:%5f" % sum_loss/TRAIN_N
+
+        ### VALIDATION ###
+        perm = np.random.permutation(VALID_N) #ランダムな整数列リストを取得
+        sum_loss     = 0.0
+        sum_accuracy = 0.0
+        for i in six.moves.range(0, VALID_N, batchsize):
+
+            x = Variable(torch.LongTensor(fill_batch(train_sens_id[perm[i:i + batchsize]]))) # source
+            t = Variable(torch.FloatTensor(np.array(train_labels[perm[i:i + batchsize]], dtype=np.float16).tolist()))  # target
+
+            optimizer.zero_grad()
+
+            x = torch.transpose(x, 0, 1) # 転置
+
+            h = Variable(torch.randn(batchsize, HIDDENSIZE))
+            c = Variable(torch.randn(batchsize, HIDDENSIZE))
+
+            for j in range(len(x)):
+                y, h, c = model(x[j], h, c)
+
+            loss = criterion(y, t)
+            sum_loss += loss.data[0] * len(t)
+
+        print "epoch:%d" % epoch, "loss:%5f" % sum_loss/VALID_N
 
 def main():
     train()
